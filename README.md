@@ -14,6 +14,8 @@ Why am I doing this?  I have a couple of Honeywell keypads and I want to use the
 
 The other bits such as Low Batt, Bypass, AC Loss, Instant, Stay, Chime Mode and others may not have a visual effect on a 6160/6460 alpha keypad, but I believe those bits make the text indicators light up on the "fixed" (aka non-dot-matrix) keypads like the 6150.
 
+There may be some other undocumented bits which might make the fixed display keypads show other messages such as "CANCELED", "NIGHT", "PHONE", "TEST", "CHECK", etc.  Same goes for the 6160CR-2 keypads with additional LEDs: "SILENCED", "SUPERVISORY", "TROUBLE".  I don't have any of those keypads, so if you want to test this, be my guest!
+
 Many thanks to TomVickers for the original code, Dilbert66 for the esphome-vistaECP code which answered a LOT of my questions, as well as markkimsal for the TANC-security/keypad-firmware code.
 
 # --original README below--
