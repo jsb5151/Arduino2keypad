@@ -7,7 +7,7 @@
 #include "KeypadSerial.h"
 
 // when arduino code inits, use these initial keypad values
-#define INIT_MSG  "F7 z=00 t=0 c=1 r=1 a=1 s=0 p=0 b=1 1=Arduino Init     2=Completed  v1.01"
+#define INIT_MSG  "F7 z=00 t=0 c=0 r=0 l=0 a=0 s=0 p=1 y=0 b=1 1=ECP Translator   2=Ready    v1.90b1"
 
 // macros to determine if command starts with 'F7' or 'F7A'
 #define F7_MSG_ALT(s)        (*((s)+0) == 'F' && *((s)+1) == '7' && *((s)+2) == 'A')
@@ -35,7 +35,8 @@ void USBprotocol::initF7(t_MesgF7 * pMsgF7)
     pMsgF7->type    = 0xF7;
     pMsgF7->keypads = 0xFF;  // send to all keypads
     pMsgF7->addr4   = 0x00;  // unknown value, my alarm panel is observed to send 0x10, but zero works
-    pMsgF7->prog    = 0x00;  // programming mode (not used)
+    pMsgF7->prog    = 0x00;  // programming mode
+    pMsgF7->prompt  = 0x00;  // prompt position
     pMsgF7->zone    = 0xFC;  // my keypad may need this to prevent fast beep problem?
 }
 
@@ -72,23 +73,33 @@ const char * USBprotocol::keyMsg(char * buf, uint8_t bufLen, uint8_t addr, uint8
     return (const char *)buf;
 }
 
-// parse F7 command, form is F7[A] z=FC t=0 c=1 r=0 a=0 s=0 p=1 b=1 1=1234567890123456 2=ABCDEFGHIJKLMNOP
+// parse F7 command, form is F7[A] z=FC t=0 c=1 r=0 l=0 a=0 s=0 p=1 y=0 k=0 x=00 b=1 1=1234567890123456 2=ABCDEFGHIJKLMNOP
 //   z - zone             (byte arg)
 //   t - tone             (nibble arg)
 //   c - chime            (bool arg)
 //   r - ready            (bool arg)
+//   l - lowbat           (bool arg)*
 //   a - arm-away         (bool arg)
 //   s - arm-stay         (bool arg)
 //   p - power-on         (bool arg)
+//   y - bypass           (bool arg)*
+//   k - program mode     (bool arg)*
+//   x - prompt position  (byte arg)*
 //   b - lcd-backlight-on (bool arg)
 //   1 - line1 text       (16-chars)
 //   2 - line2 text       (16-chars)
 
 // BYTE1 tone notes
+//   ? ? ? n x t t t
+//         | | +-+-+--- tone values 0-7 (see below)
+//         | +--------- 0 = low, 1 = louder (tbd)        
+//         +----------- night?  
+//
 //   00-03 - low two bits define chime count for each F7 msg (0 none, 1,2,3 chime count per msg)
 //   04    - fast pulsing tone (like there is an error, or timeout almost done)
 //   05-06 - slow pulsing tone (like when alarm is in arm-delay and it is time to leave)
 //   07    - continous tone (not pulsing)
+//   08-16 - similar to above but louder
 //   bits above bottom 3 don't do anything, 0x40 bit causes incompat. con. error
 
 // BYTE2 notes: bit(0x80) 1 -> ARMED-STAY, bit(0x10) 1 -> READY (1 when ok, 0 when exit delay)
@@ -110,30 +121,51 @@ uint8_t USBprotocol::parseF7(const char * msg, uint8_t len, t_MesgF7 * pMsgF7)
             char parm = *(msg+i);
             i += 2;  // move past parm and '=', msg+i now points at arg 
 
-            switch (parm)
+             switch (parm)
             {
-            case 'z':
+            case 'A': // testing for byte 1
+                pNewF7->byte1 = GET_BYTE(*(msg+i), *(msg+i+1)); i += 2;
+                break;
+            case 'B': // testing for byte 2
+                pNewF7->byte2 = GET_BYTE(*(msg+i), *(msg+i+1)); i += 2;
+                break;
+            case 'C': // testing for byte 3
+                pNewF7->byte3 = GET_BYTE(*(msg+i), *(msg+i+1)); i += 2;
+                break;
+            case 'z': // zone
                 pNewF7->zone = GET_BYTE(*(msg+i), *(msg+i+1)); i += 2;
                 break;
-            case 't':
+            case 't': // tone
                 pNewF7->byte1 = GET_NIBBLE(*(msg+i)); i++;
                 break;
-            case 'c':
+            case 'c': // chime
                 pNewF7->byte3 = SET_CHIME(pNewF7->byte3, GET_BOOL(*(msg+i))); i++;
                 break;
-            case 'r':
+            case 'r': // ready state
                 pNewF7->byte2 = SET_READY(pNewF7->byte2, GET_BOOL(*(msg+i))); i++;
                 break;
-            case 'a':
+            case 'l': // low battery
+                pNewF7->byte2 = SET_LOWBAT(pNewF7->byte2, GET_BOOL(*(msg+i))); i++;
+                break;
+            case 'a': // arm away
                 pNewF7->byte3 = SET_ARMED_AWAY(pNewF7->byte3, GET_BOOL(*(msg+i))); i++;
                 break;
-            case 's':
+            case 's': // arm stay
                 pNewF7->byte2 = SET_ARMED_STAY(pNewF7->byte2, GET_BOOL(*(msg+i))); i++;
                 break;
-            case 'p':
+            case 'p': // power
                 pNewF7->byte3 = SET_POWER(pNewF7->byte3, GET_BOOL(*(msg+i))); i++;
                 break;
-            case 'b':
+            case 'y': // bypass
+                pNewF7->byte3 = SET_BYPASS(pNewF7->byte3, GET_BOOL(*(msg+i))); i++;
+                break;
+            case 'k': // programing mode
+                pNewF7->prog = GET_NIBBLE(*(msg+i)); i++;
+                break;
+            case 'x': // programming cursor position
+                pNewF7->prompt = GET_BYTE(*(msg+i), *(msg+i+1)); i += 2;
+                break;            
+            case 'b': // backlight
                 lcd_backlight = GET_BOOL(*(msg+i)); i++;
                 break;
             case '1':  // line1 arg must occur after 'b' parameter for this code to work
@@ -212,4 +244,3 @@ const char * USBprotocol::printF7(char * buf)
     return (const char *)buf;
 }
 #endif
-
